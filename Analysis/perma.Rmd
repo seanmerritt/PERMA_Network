@@ -1,0 +1,732 @@
+---
+title: "perma"
+author: "Sean Merritt"
+date: "4/29/2021"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(psychonetrics)
+library(tidyverse)
+library(EGAnet)
+library(lavaan)
+library(apaTables)
+library(Hmisc)
+library(intergraph)
+```
+
+```{r}
+dat <- read_csv("~/C - Research/PERMA Networks/PERMA_networks/clean_data.csv")
+descrip <- dat %>% select(Race, Gender, Age)
+
+jmv::descriptives(descrip)
+
+descrip %>%
+  group_by(Gender) %>%
+ count()
+
+descrip %>%
+  group_by(Race) %>%
+ count()
+
+native = 2 + 3 + 3
+asian =  33 + 2
+islander = 1 + 1
+black = 62 + 4 + 3 + 1 + 2 
+hispanic = 21 + + 14
+white = 406 + 3+ 4 + 3 + 1 + 2 + 14 + 1 + 1
+other = 1 + 2 + 1
+
+data.frame(native, asian, islander, black, hispanic, white, other)
+```
+
+
+```{r include=FALSE}
+dat <- read_csv("~/C - Research/PERMA Networks/PERMA_networks/clean_data.csv") %>% 
+  select(P1,P2,P3,E1,E2,E3,R1,R2,R3,M1,M2,M3,A1,A2,A3,N1, N2,N3, H1, H2, H3, SWL_1:SWL_5, PANAS_1:PANAS_13, big5_1:big5_15) %>%
+  na.omit()
+
+descriptive <- dat %>% 
+  rowwise() %>% 
+  mutate(P = mean(P1:P3, na.rm = T), 
+         E = mean(E1:E3, na.rm = T),
+         R = mean(R1:R3, na.rm = T),
+         M = mean(M1:M3, na.rm = T),
+         A = mean(A1:A3, na.rm = T),
+         N = mean(N1:N3, na.rm = T),
+         H = mean(H1:H3, na.rm = T),
+         SWL = mean(SWL_1:SWL_5, na.rm = T),
+         Pos = (PANAS_1 + PANAS_3 + PANAS_5 + PANAS_6 + PANAS_8 + PANAS_11 + PANAS_13),
+         Neg = (PANAS_2 + PANAS_4 + PANAS_7 + PANAS_9 + PANAS_10 + PANAS_12)
+         ) %>% 
+  select(P,E,R,M,A,N,H,
+         SWL, 
+         Pos, Neg
+         ) 
+```
+
+# Results
+## Descriptives
+
+```{r echo=FALSE}
+x <- rbind(c(1,2,3), c(4,5,6), c(7,8,9))
+#apply_if(x, upper.tri(x), function(x) x + 5)
+apply_if <- function(mat, p, f) {
+  # Fill NA with FALSE
+  p[is.na(p)] <- FALSE
+  mat[p] <- f(mat[p])
+  mat
+}
+apaCorr <- function(mat, corrtype = "pearson") {
+  matCorr <- mat
+  if (class(matCorr) != "rcorr") {
+    matCorr <- rcorr(mat, type = corrtype)
+  }
+
+  # Add one star for each p < 0.05, 0.01, 0.001
+  stars <- apply_if(round(matCorr$r, 2), matCorr$P < 0.05, function(x) paste0(x, "*"))
+  stars <- apply_if(stars, matCorr$P < 0.01, function(x) paste0(x, "*"))
+  stars <- apply_if(stars, matCorr$P < 0.001, function(x) paste0(x, "*"))
+  # Put - on diagonal and blank on upper diagonal
+  stars[upper.tri(stars, diag = T)] <- "-"
+  stars[upper.tri(stars, diag = F)] <- ""
+  n <- length(stars[1,])
+  colnames(stars) <- 1:n
+  # Remove _ and convert to title case
+  row.names(stars) <- tools::toTitleCase(sapply(row.names(stars), gsub, pattern="_", replacement = " "))
+  # Add index number to row names
+  row.names(stars) <- paste(paste0(1:n,"."), row.names(stars))
+  stars
+}
+
+irisStars <- apaCorr(as.matrix(descriptive), corrtype = "pearson")
+
+irisStars %>% 
+     knitr::kable("latex",booktabs=TRUE) %>% 
+     kableExtra::kable_styling()
+
+descriptive %>% 
+  jmv::descriptives(sd =T)
+```
+## Replication of Goodman et al.
+
+We first ran the same factor analysis found in Goodman et al (2016). We also tested two additional models that consisted of independent factors with and without effective measures. We find all models, with the exception of the independent factors model (with emotion) had adequete fit (see table 2).
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+m1 <- '
+P =~ P1 + P2+ P3
+E =~ E1  + E2 + E3
+R =~ R1 + R2 + R3
+M =~ M1 + M2 +M3
+A =~ A1 + A2 + A3
+
+
+
+SWL =~ SWL_1 + SWL_2 + SWL_3 + SWL_4 + SWL_5
+Pos =~ PANAS_1 + PANAS_3 + PANAS_5 + PANAS_6 + PANAS_8 + PANAS_11 + PANAS_13
+Neg =~ PANAS_2 + PANAS_4 + PANAS_7 + PANAS_9 + PANAS_10 + PANAS_12
+
+wellbeing =~ P + E + R + M + A + SWL + Pos + Neg
+'
+fit1b <- sem(m1, data=dat)
+
+model1_results <- summary(fit1b, fit.measures = T)$FIT
+chisq <- model1_results[[3]]
+df <- model1_results[[4]]
+pvalue <- model1_results[[5]]
+cfi <- model1_results[[9]]
+tli <- model1_results[[10]]
+aic <- model1_results[[13]]
+bic <- model1_results[[14]]
+rmsea <- model1_results[[17]]
+one_factor_fit <- data.frame(Model = "One Factor",df, chisq,pvalue,tli, cfi, rmsea,aic,bic)
+
+
+m2 <- '
+P =~ P1 + P2+ P3
+E =~ E1  + E2 + E3
+R =~ R1 + R2 + R3
+M =~ M1 + M2 +M3
+A =~ A1 + A2 + A3
+
+SWL =~ SWL_1 + SWL_2 + SWL_3 + SWL_4 + SWL_5
+Pos =~ PANAS_1 + PANAS_3 + PANAS_5 + PANAS_6 + PANAS_8 + PANAS_11 + PANAS_13
+Neg =~ PANAS_2 + PANAS_4 + PANAS_7 + PANAS_9 + PANAS_10 + PANAS_12
+
+SWB =~  SWL + Neg + Pos
+PERMA =~ P + E + R + M + A 
+
+SWB ~~ PERMA
+'
+fit2 <- sem(m2, data=dat)
+summary(fit2, fit.measures = T)
+model2_results <- summary(fit1b, fit.measures = T)$FIT
+chisq <- model1_results[[3]]
+df <- model2_results[[4]]
+pvalue <- model2_results[[5]]
+cfi <- model2_results[[9]]
+tli <- model2_results[[10]]
+aic <- model2_results[[13]]
+bic <- model2_results[[14]]
+rmsea <- model2_results[[17]]
+two_factor_fit <- data.frame(Model = "SWB~PERMA",df, chisq,pvalue,tli, cfi, rmsea,aic,bic)
+
+m3 <- '
+P =~ P1 + P2+ P3
+E =~ E1  + E2 + E3
+R =~ R1 + R2 + R3
+M =~ M1 + M2 +M3
+A =~ A1 + A2 + A3
+
+SWL =~ SWL_1 + SWL_2 + SWL_3 + SWL_4 + SWL_5
+Pos =~ PANAS_1 + PANAS_3 + PANAS_5 + PANAS_6 + PANAS_8 + PANAS_11 + PANAS_13
+Neg =~ PANAS_2 + PANAS_4 + PANAS_7 + PANAS_9 + PANAS_10 + PANAS_12
+
+SWB =~  SWL + Neg + Pos + P 
+PERMA =~ E + R + M + A 
+
+SWB ~~ PERMA
+'
+fit3 <- sem(m3, data=dat)
+model3_results <- summary(fit3, fit.measures = T)$FIT
+chisq <- model3_results[[3]]
+df <- model3_results[[4]]
+pvalue <- model3_results[[5]]
+cfi <- model3_results[[9]]
+tli <- model3_results[[10]]
+aic <- model3_results[[13]]
+bic <- model3_results[[14]]
+rmsea <- model3_results[[17]]
+SWB_plusP_fit <- data.frame(Model = "SWB+P~ERMA",df, chisq,pvalue,tli, cfi, rmsea,aic,bic)
+
+m4 <- '
+E =~ E1  + E2 + E3
+R =~ R1 + R2 + R3
+M =~ M1 + M2 +M3
+A =~ A1 + A2 + A3
+
+
+SWL =~ SWL_1 + SWL_2 + SWL_3 + SWL_4 + SWL_5
+Neg =~ PANAS_2 + PANAS_4 + PANAS_7 + PANAS_9 + PANAS_10 + PANAS_12
+SWB =~ SWL + Neg
+ERMA =~ E + R + M + A 
+
+SWB ~~ ERMA
+'
+fit4 <- sem(m4, data=dat)
+model4_results <- summary(fit4, fit.measures = T)$FIT
+chisq <- model4_results[[3]]
+df <- model4_results[[4]]
+pvalue <- model4_results[[5]]
+cfi <- model4_results[[9]]
+tli <- model4_results[[10]]
+aic <- model4_results[[13]]
+bic <- model4_results[[14]]
+rmsea <- model4_results[[17]]
+no_hap_fit <- data.frame(Model = "SWB~ERMA",df, chisq,pvalue,tli, cfi, rmsea,aic,bic)
+
+
+
+
+cfa_results <- one_factor_fit %>% 
+  rbind(two_factor_fit) %>% 
+  rbind(SWB_plusP_fit) %>% 
+  rbind(no_hap_fit)  
+
+names(cfa_results) <- c("Model","df", "$\\chi^2$", "p", "TLI", "CFI", "RMSEA","AIC", "BIC")
+```
+
+```{r fit table3, echo=FALSE}
+cfa_results %>% 
+knitr::kable("latex",booktabs=TRUE) %>% 
+     kableExtra::kable_styling()
+```
+
+```{r}
+semGraph <- function(fit, plot_name, layout = lay, angle = 180){
+  prepare_graph(fit, layout = layout, angle = angle) %>% 
+  edit_graph({ label = paste(est_sig_std, "\n", confint_std) }) %>%
+  edit_graph({ label = paste(name ) }, element = "nodes") %>%
+  edit_graph({label_size = 2}) %>%
+  plot()
+  
+ggsave(filename = plot_name, width = 8, height = 4)
+}
+```
+
+```{r}
+lay = get_layout("","","","","wellbeing","","","", "SWL", "Pos","Neg", "P", "E",  "R", "M","A", rows = 2)
+semGraph(fit1b,"Model1.jpeg")
+```
+
+
+```{r echo=FALSE}
+lay <- get_layout("","","SWB", "","","PERMA","","","SWL", "Pos","Neg", "P", "E",  "R", "M","A", rows = 2)
+semGraph(fit2, "Model2.jpeg")
+```
+```{r}
+lay = get_layout("","","SWB", "","","PERMA","","","SWL", "Pos","Neg", "P", "E",  "R", "M","A", rows = 2)
+semGraph(fit3, "Model3.jpeg")
+```
+```{r}
+lay = get_layout("","","SWB", "","","ERMA","","","SWL", "Neg",  "E",  "R", "M","A", rows = 2)
+semGraph(fit4, "Model4.jpeg")
+```
+
+
+
+## Network Perspective
+
+We then created four network models. Model 1 used just the PERMA questions, model 2 was PERMA plus negative emotions (N) and health (H). Model 3 we only modeled subjective well-being with model 4 combing subjective well-being. For each model we divided the data into a exploratory set to find the network structure and a confirmatory set to confirm the fit of the network to the data. All four models have adequete fit (see Table 3).  
+
+```{r include=FALSE}
+ExploratoryNetwork <- function(Explore){
+  n_1 <- dim(Explore)[1]
+  cor1 <- cor(Explore)
+  
+ 
+  ny <- length(colnames(Explore))
+  
+  saturatedModel <- ggm( covs = ( n_1 - 1 )/n_1*cor1,
+                          omega = "Full",
+                          nobs = n_1 )
+
+  prunedModel <- saturatedModel %>% prune( alpha = 0.01, recursive = TRUE )
+  finalModel  <- prunedModel %>% stepup
+  adjacency <- 1*( getmatrix(finalModel, "omega" ) !=0 )
+  return(adjacency)
+}
+```
+
+```{r include=FALSE}
+## Confirmatory modeling
+confirmatoryNetwork <- function(confirm, adjacency,Model){
+  n_2 <- dim(confirm)[1]
+  cor2 <- cor(confirm)
+
+  nwModel <- ggm( covs = ( n_2 - 1 )/n_2*cor2,
+                omega = adjacency,
+                nobs = n_2) 
+ 
+  nwModel <- nwModel %>% runmodel
+  
+  matrix <- getmatrix( nwModel, "omega" )
+  
+  ## Compare
+  result_nw <- fit(nwModel)
+  
+  
+  results <- result_nw %>%  
+    mutate(model = Model) %>% 
+    filter(Measure %in% c('chisq',"df",'pvalue', 'tli','cfi','rmsea','aic.ll', 'bic','ebic1'))
+  
+  return(list(results = results,matrix = matrix))
+ 
+}
+
+```
+
+```{r include=FALSE}
+set.seed(2)
+explore <- sample(1:nrow(dat), nrow(dat)*.5, replace = F)
+```
+
+```{r include=FALSE}
+## PERMA NETWORK
+PERMA_Explore <- dat[explore,]%>% 
+  select(P1,P2,P3,E1,E2,E3,R1,R2,R3,M1,M2,M3,A1,A2,A3) 
+
+PERMA_confirm <- dat[-explore,] %>% 
+  select(P1,P2,P3,E1,E2,E3,R1,R2,R3,M1,M2,M3,A1,A2,A3)
+
+yvars = colnames(PERMA_Explore)
+
+lvars <- c( 
+  "P", # Positive emttions
+  "E", # Engagement
+  "R", # Relationships
+  "M",  # Meaning
+  "A"  #Accomplishment
+)
+
+ne <- length( lvars )
+
+
+lambda <- matrix( c (
+  #P  E  R  M  A   
+  1, 0, 0, 0, 0, #P1
+  1, 0, 0, 0, 0,# P2
+  1, 0, 0, 0, 0,# P3
+  0, 1, 0, 0, 0,# MR
+  0, 1, 0, 0, 0,# VC
+  0, 1, 0, 0, 0,# AR 
+  0, 0, 1, 0, 0,# SS
+  0, 0, 1, 0, 0,# VP
+  0, 0, 1, 0, 0,# IN
+  0, 0, 0, 1, 0,# CD
+  0, 0, 0, 1, 0,# LN
+  0, 0, 0, 1, 0,# FW  
+  0, 0, 0, 0, 1,# CO
+  0, 0, 0, 0, 1,# CA
+  0, 0, 0, 0,  1# PC
+), 
+ncol = ne, 
+byrow = TRUE,
+dimnames = list( yvars, lvars ) 
+)
+```
+
+```{r include=FALSE}
+## Exploratory 
+adjacency <- ExploratoryNetwork(PERMA_Explore)
+```
+
+```{r}
+colnames(adjacency) <- yvars
+rownames(adjacency) <- yvars
+write.csv(adjacency,"PERMA_adjacency.csv")
+```
+
+```{r include = FALSE}
+results_PERMA <- confirmatoryNetwork(PERMA_confirm,adjacency, "PERMA")
+```
+
+```{r echo=FALSE}
+jpeg("permaGraph.jpeg")
+
+qgraph::qgraph( results_PERMA$matrix, 
+        labels = yvars[1:15],
+         groups = list( `Positive Emotions`   = which( lambda[ , 1 ] == 1 ),
+                       Engagement        = which( lambda[ , 2 ] == 1 ),
+                       Relationships = which( lambda[ , 3 ] == 1 ),
+                       Meaning         = which( lambda[ , 4 ] == 1 ), 
+                        Accomplishment   = which( lambda[ , 5 ] == 1 )),
+        layout = "spring" )
+dev.off()
+```
+
+
+
+```{r include=FALSE}
+PERMANH_Explore <- dat[explore,]%>% 
+  select(P1,P2,P3,E1,E2,E3,R1,R2,R3,M1,M2,M3,A1,A2,A3,N1, N2, N3, H1, H2, H3) 
+
+PERMANH_confirm <- dat[-explore,] %>% 
+  select(P1,P2,P3,E1,E2,E3,R1,R2,R3,M1,M2,M3,A1,A2,A3,N1, N2, N3, H1, H2, H3)
+
+yvars = colnames(PERMANH_Explore)
+ny <- length(colnames(PERMANH_Explore))
+
+lvars <- c( 
+  "P", # Positive emttions
+  "E", # Engagement
+  "R", # Relationships
+  "M",  # Meaning
+  "A",  #Accomplishment
+  "N",
+  "H"
+)
+
+ne <- length( lvars )
+
+
+lambda <- matrix( c (
+  #P  E  R  M  A N H  
+  1, 0, 0, 0, 0, 0, 0, #P1
+  1, 0, 0, 0, 0, 0, 0,# P2
+  1, 0, 0, 0, 0, 0, 0,# P3
+  0, 1, 0, 0, 0, 0, 0,# MR
+  0, 1, 0, 0, 0, 0, 0,# VC
+  0, 1, 0, 0, 0, 0, 0,# AR 
+  0, 0, 1, 0, 0, 0, 0,# SS
+  0, 0, 1, 0, 0, 0, 0,# VP
+  0, 0, 1, 0, 0, 0, 0,# IN
+  0, 0, 0, 1, 0, 0, 0,# CD
+  0, 0, 0, 1, 0, 0, 0,# LN
+  0, 0, 0, 1, 0, 0, 0,# FW  
+  0, 0, 0, 0, 1, 0, 0,# CO
+  0, 0, 0, 0, 1, 0, 0,# CA
+  0, 0, 0, 0, 1, 0, 0,# PC
+  0, 0, 0, 0, 0, 1, 0,
+  0, 0, 0, 0, 0, 1, 0,
+  0, 0, 0, 0, 0, 1, 0,
+  0, 0, 0, 0, 0, 0, 1,
+  0, 0, 0, 0, 0, 0, 1,
+  0, 0, 0, 0, 0, 0, 1
+  ), 
+ncol = ne, 
+byrow = TRUE,
+dimnames = list( yvars, lvars ) 
+)
+```
+
+```{r include=FALSE}
+## Exploratory 
+adjacency <- ExploratoryNetwork(PERMANH_Explore)
+```
+
+
+```{r}
+colnames(adjacency) <- yvars
+rownames(adjacency) <- yvars
+write.csv(adjacency,"PERMA+NH_adjacency.csv")
+```
+
+
+```{r include=FALSE}
+## Confirmatory modeling
+results_PERMANH <- confirmatoryNetwork(PERMANH_confirm,adjacency, "PERMA+NH")
+```
+
+```{r echo = FALSE}
+jpeg("permanhGraph.jpeg")
+qgraph::qgraph(results_PERMANH$matrix, 
+        labels = yvars[1:21],
+         groups = list( `Positive Emotions`   = which( lambda[ , 1 ] == 1 ),
+                       Engagement        = which( lambda[ , 2 ] == 1 ),
+                       Relationships = which( lambda[ , 3 ] == 1 ),
+                       Meaning         = which( lambda[ , 4 ] == 1 ), 
+                        Accomplishment   = which( lambda[ , 5 ] == 1 ),
+                      `Negative Emotions`       = which( lambda[ , 6 ] == 1 ),
+                       Health = which( lambda[ , 7 ] == 1 )),
+        layout = "spring" )
+dev.off()
+```
+
+
+```{r include=FALSE}
+SWB_Explore <- dat[explore,]%>% 
+  select(SWL_1:PANAS_13) 
+
+SWB_confirm <- dat[-explore,] %>% 
+  select(SWL_1:PANAS_13)
+
+yvars = colnames(SWB_Explore)
+ny <- length(colnames(SWB_Explore))
+
+lvars <- c( 
+  "SWL", 
+  "POS",
+  "Neg"
+)
+
+
+ne <- length( lvars )
+
+
+lambda <- matrix( c (
+#SWL POS Neg   
+  1, 0, 0, #SWL1
+  1, 0, 0,# 2
+  1, 0, 0,# 3
+  1, 0, 0,# 4
+  1, 0, 0,# 5
+  0, 1, 0,# 1 
+  0, 0, 1,# 2
+  0, 1, 0,# 3
+  0, 0, 1,# 4
+  0, 1, 0,# 5
+  0, 0, 1,# 6
+  0, 1, 0,# 7  
+  0, 0, 1,# 8
+  0, 1, 0,# 9
+  0, 0, 1,# 10
+  0, 1, 0, # 11
+  0, 0, 1, # 12
+  0, 1, 0 # 13
+  ), 
+ncol = ne, 
+byrow = TRUE,
+dimnames = list(yvars, lvars ) 
+)
+```
+
+```{r include = False}
+## Exploratory
+adjacency  <- ExploratoryNetwork(SWB_Explore)
+```
+
+```{r}
+colnames(adjacency) <- yvars
+rownames(adjacency) <- yvars
+write.csv(adjacency,"SWB_adjacency.csv")
+```
+
+```{r include = False}
+## Exploratory
+results_SWB  <- confirmatoryNetwork(SWB_confirm,adjacency, "SWB")
+```
+```{r echo = FALSE}
+jpeg("swbGraph.jpeg")
+qgraph::qgraph( results_SWB$matrix, 
+        labels = yvars,
+         groups = list( `Satisfaction with Life`  = which( lambda[ , 1] == 1 ),
+                       `Positive Affect`        = which( lambda[ ,2] == 1 ),
+                      `Negative Affect`        = which( lambda[ ,3 ] == 1 )),
+        layout = "spring" )
+dev.off()
+```
+
+```{r include=FALSE}
+
+PERMANHSWB_Explore <- dat[explore,] %>% 
+  select(P1:PANAS_13)
+
+PERMANHSWB_confirm <- dat[-explore,]%>% 
+  select(P1:PANAS_13)
+
+yvars = colnames(PERMANHSWB_Explore )
+ny <- length(colnames(PERMANHSWB_Explore))
+
+lvars <- c( 
+  "P", # Positive emttions
+  "E", # Engagement
+  "R", # Relationships
+  "M",  # Meaning
+  "A",  #Accomplishment
+  "N",
+  "H",
+  "SWL", 
+  "POS",
+  "Neg"
+)
+
+
+ne <- length( lvars )
+
+
+
+lambda <- matrix( c (
+  #P  E  R  M  A N  H  SWL Pos Neg 
+  1, 0, 0, 0, 0, 0, 0, 0,0, 0, #P1
+  1, 0, 0, 0, 0, 0, 0, 0,0, 0,# P2
+  1, 0, 0, 0, 0, 0, 0, 0,0, 0,# P3
+  0, 1, 0, 0, 0, 0, 0, 0,0, 0,# MR
+  0, 1, 0, 0, 0, 0, 0, 0,0, 0,# VC
+  0, 1, 0, 0, 0, 0, 0, 0,0, 0,# AR 
+  0, 0, 1, 0, 0, 0, 0, 0,0, 0,# SS
+  0, 0, 1, 0, 0, 0, 0, 0,0, 0,# VP
+  0, 0, 1, 0, 0, 0, 0, 0,0, 0,# IN
+  0, 0, 0, 1, 0, 0, 0, 0,0, 0,# CD
+  0, 0, 0, 1, 0, 0, 0, 0,0, 0,# LN
+  0, 0, 0, 1, 0, 0, 0, 0,0, 0,# FW  
+  0, 0, 0, 0, 1, 0, 0, 0,0, 0,# CO
+  0, 0, 0, 0, 1, 0, 0, 0,0, 0,# CA
+  0, 0, 0, 0, 1, 0, 0, 0,0, 0,
+  0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+  0, 0 ,0, 0, 0, 0, 0, 1, 0, 0, #SWL1
+  0, 0 ,0, 0, 0, 0, 0, 1, 0, 0,# 2
+  0, 0 ,0, 0, 0, 0, 0, 1, 0, 0,# 3
+  0, 0 ,0, 0, 0, 0, 0, 1, 0, 0,# 4
+  0, 0 ,0, 0, 0, 0, 0, 1, 0, 0,# 5
+  0, 0 ,0, 0, 0,0,0, 0,  1, 0,# 1 
+  0, 0 ,0, 0, 0,0, 0, 0, 0, 1,# 2
+  0, 0 ,0, 0, 0,0, 0, 0, 1, 0,# 3
+  0, 0 ,0, 0, 0,0,0, 0, 0, 1,# 4
+  0, 0 ,0, 0, 0,0,0, 0, 1, 0,# 5
+  0, 0 ,0, 0, 0,0, 0, 0,1, 0,# 6
+  0, 0 ,0, 0, 0,0,0, 0, 0, 1,# 7  
+  0, 0 ,0, 0, 0,0,0, 0, 1, 0,# 8
+  0, 0 ,0, 0, 0,0,0, 0, 0, 1,# 9
+  0, 0 ,0, 0, 0,0,0, 0, 0, 1,# 10
+  0, 0 ,0, 0, 0,0,0, 0, 1, 0, # 11
+  0, 0 ,0, 0, 0,0,0, 0, 0, 1, # 12
+  0, 0 ,0, 0, 0,0, 0, 0,1, 0# PC
+), 
+ncol = ne, 
+byrow = TRUE,
+dimnames = list( yvars, lvars ) 
+)
+```
+
+```{r include = FALSE}
+## Exploratory
+adjacency <- ExploratoryNetwork(PERMANHSWB_Explore)
+```
+
+```{r}
+colnames(adjacency) <- yvars
+rownames(adjacency) <- yvars
+write.csv(adjacency,"PERMA+NH+SWB_adjacency.csv")
+```
+
+```{r include = FALSE}
+### Network confirmatory
+results_nwSWB_PERMA <- confirmatoryNetwork(PERMANHSWB_confirm, adjacency, "PERMA+NH+SWB")
+```
+
+```{r echo=FALSE}
+jpeg("permanhSwbGraph.jpeg")
+qgraph::qgraph( results_nwSWB_PERM$matrix, 
+        labels = yvars,
+        groups = list( `Positive Emotions`   = which( lambda[ , 1 ] == 1 ),
+                       Engagement        = which( lambda[ , 2 ] == 1 ),
+                       Relationships = which( lambda[ , 3 ] == 1 ),
+                       Meaning         = which( lambda[ , 4 ] == 1 ), 
+                        Accomplishment   = which( lambda[ , 5 ] == 1 ),
+                      `Negative Emotions`       = which( lambda[ , 6 ] == 1 ),
+                       Health = which( lambda[ , 7 ] == 1 ),
+                       `Satisfaction with Life`         = which( lambda[ , 8 ] == 1 ),
+                       `Positive Affect`        = which( lambda[ ,9 ] == 1 ),
+                      `Negative Affect`        = which( lambda[ ,10 ] == 1 )),
+        layout = "spring" )
+dev.off()
+```
+
+
+## Compare models fit indeces
+
+```{r include=FALSE}
+## Compare
+results_SWB_PERMA <-  results_nwSWB_PERMA$results %>%  
+  mutate(model = "SWB + PERMANH") %>% 
+  filter(Measure %in% c('chisq',"df",'pvalue', 'tli','cfi','rmsea','aic.ll', 'bic','ebic1'))
+
+results_SWB <- result_SWB %>%  
+  mutate(model = "SWB") %>% 
+  filter(Measure %in% c('chisq',"df",'pvalue', 'tli','cfi','rmsea','aic.ll', 'bic','ebic1'))
+
+results_network <-  results_PERMA$results %>% 
+  rbind(results_PERMANH$results) %>% 
+  #rbind(results_SWB) %>% 
+  rbind(results_nwSWB_PERMA$results) %>%
+  pivot_wider(names_from = "Measure", values_from = "Value")
+
+names(results_network) <- c("Model","df", "$\\chi^2$", "p", "TLI", "CFI", "RMSEA","AIC", "BIC", "EBIC")
+```
+
+
+```{r fit tableNetwork, echo=FALSE}
+results_network %>% 
+     knitr::kable("latex",booktabs=TRUE) %>% 
+     kableExtra::kable_styling()
+```
+
+## Network Loadings
+
+
+```{r include=FALSE}
+ loadings <- dat %>% 
+  select(P1:PANAS_13) %>%
+  EGAnet::EGA() %>% 
+  EGAnet::net.loads()
+
+load_df <- as.data.frame(loadings$std)
+```
+
+```{r net loadings table, echo=FALSE}
+load_df %>% 
+  arrange(match(rownames(load_df), c("P1","P2","P3","E1","E2","E3","R1","R2","R3","M1","M2","M3","A1","A2","A3", "N1","N2","N3", "H1","H2", "H3",'SWL_1','SWL_2','SWL_3','SWL_4','SWL_5','PANAS_1','PANAS_2','PANAS_3','PANAS_4','PANAS_5','PANAS_6','PANAS_7','PANAS_8','PANAS_9','PANAS_10','PANAS_11','PANAS_12','PANAS_13')))%>% 
+     knitr::kable("latex",booktabs=TRUE) %>% 
+     kableExtra::kable_styling()
+```
